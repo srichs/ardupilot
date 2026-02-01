@@ -1,9 +1,14 @@
 #include "ArduHAB/HAB.h"
 
+#include <cmath>
+
 namespace ardupilot {
 namespace hab {
 
 namespace {
+
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kEarthRadiusMeters = 6371000.0;
 
 float Clamp01(float value) {
   if (value < 0.0f) {
@@ -15,11 +20,52 @@ float Clamp01(float value) {
   return value;
 }
 
+double DegreesToRadians(double degrees) {
+  return degrees * (kPi / 180.0);
+}
+
+double HaversineDistanceMeters(double lat1_deg, double lon1_deg,
+                               double lat2_deg, double lon2_deg) {
+  const double lat1_rad = DegreesToRadians(lat1_deg);
+  const double lat2_rad = DegreesToRadians(lat2_deg);
+  const double dlat = lat2_rad - lat1_rad;
+  const double dlon = DegreesToRadians(lon2_deg - lon1_deg);
+  const double sin_dlat = std::sin(dlat * 0.5);
+  const double sin_dlon = std::sin(dlon * 0.5);
+  const double a = sin_dlat * sin_dlat +
+                   std::cos(lat1_rad) * std::cos(lat2_rad) * sin_dlon *
+                       sin_dlon;
+  const double c = 2.0 * std::atan2(std::sqrt(a), std::sqrt(1.0 - a));
+  return kEarthRadiusMeters * c;
+}
+
+bool FindValidFix(const GpsFix (&gps)[kMaxGpsModules], GpsFix* fix) {
+  if (fix == nullptr) {
+    return false;
+  }
+  for (size_t index = 0; index < kMaxGpsModules; ++index) {
+    if (gps[index].valid) {
+      *fix = gps[index];
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 ArduHab::ArduHab() : config_{}, status_{} {
   config_.balloon_type = BalloonType::kSuperPressure;
   config_.comms = {false, false, false, false, false};
+  config_.cutaway.allow_manual_command = true;
+  config_.cutaway.timer_enabled = false;
+  config_.cutaway.timer_seconds = 0U;
+  config_.cutaway.geofence.enabled = false;
+  config_.cutaway.geofence.center_latitude_deg = 0.0;
+  config_.cutaway.geofence.center_longitude_deg = 0.0;
+  config_.cutaway.geofence.radius_m = 0.0f;
+  config_.cutaway.max_altitude_enabled = false;
+  config_.cutaway.max_altitude_m = 0.0f;
   config_.gps_count = 0U;
   config_.pressure_sensor_count = 0U;
   config_.temperature_sensor_count = 0U;
@@ -61,6 +107,47 @@ void ArduHab::SetCutawayState(uint8_t index, bool enabled) {
   status_.actuators.cutaway_enabled[index] = enabled;
 }
 
+void ArduHab::EvaluateCutaway(const CutawayInputs& inputs) {
+  const bool manual_allowed = config_.cutaway.allow_manual_command;
+  status_.cutaway.manual_commanded = manual_allowed && inputs.manual_commanded;
+
+  status_.cutaway.timer_elapsed = config_.cutaway.timer_enabled &&
+                                  (inputs.elapsed_seconds >=
+                                   config_.cutaway.timer_seconds);
+
+  status_.cutaway.geofence_violation = false;
+  status_.cutaway.altitude_violation = false;
+
+  GpsFix fix{};
+  const bool has_fix = FindValidFix(status_.gps, &fix);
+  if (has_fix) {
+    if (config_.cutaway.geofence.enabled &&
+        config_.cutaway.geofence.radius_m > 0.0f) {
+      const double distance = HaversineDistanceMeters(
+          fix.latitude_deg, fix.longitude_deg,
+          config_.cutaway.geofence.center_latitude_deg,
+          config_.cutaway.geofence.center_longitude_deg);
+      status_.cutaway.geofence_violation =
+          distance > static_cast<double>(config_.cutaway.geofence.radius_m);
+    }
+
+    if (config_.cutaway.max_altitude_enabled) {
+      status_.cutaway.altitude_violation =
+          fix.altitude_m > config_.cutaway.max_altitude_m;
+    }
+  }
+
+  status_.cutaway.cutaway_active =
+      status_.cutaway.manual_commanded || status_.cutaway.timer_elapsed ||
+      status_.cutaway.geofence_violation || status_.cutaway.altitude_violation;
+
+  if (status_.cutaway.cutaway_active) {
+    for (size_t index = 0; index < kMaxCutawayCircuits; ++index) {
+      status_.actuators.cutaway_enabled[index] = true;
+    }
+  }
+}
+
 void ArduHab::SetHeaterState(uint8_t index, bool enabled) {
   if (index >= kMaxHeaters) {
     return;
@@ -88,6 +175,11 @@ void ArduHab::ResetActuators() {
     status_.actuators.heater_enabled[index] = false;
   }
   status_.actuators.vent_position = 0.0f;
+  status_.cutaway.manual_commanded = false;
+  status_.cutaway.timer_elapsed = false;
+  status_.cutaway.geofence_violation = false;
+  status_.cutaway.altitude_violation = false;
+  status_.cutaway.cutaway_active = false;
 }
 
 void ArduHab::ApplySafetyLimits() {

@@ -24,6 +24,22 @@ struct CommsConfig {
   bool starlink_enabled;
 };
 
+struct GeofenceConfig {
+  bool enabled;
+  double center_latitude_deg;
+  double center_longitude_deg;
+  float radius_m;
+};
+
+struct CutawayConfig {
+  bool allow_manual_command;
+  bool timer_enabled;
+  uint32_t timer_seconds;
+  GeofenceConfig geofence;
+  bool max_altitude_enabled;
+  float max_altitude_m;
+};
+
 struct GpsFix {
   bool valid;
   double latitude_deg;
@@ -42,9 +58,23 @@ struct ActuatorState {
   float vent_position;
 };
 
+struct CutawayStatus {
+  bool manual_commanded;
+  bool timer_elapsed;
+  bool geofence_violation;
+  bool altitude_violation;
+  bool cutaway_active;
+};
+
+struct CutawayInputs {
+  bool manual_commanded;
+  uint32_t elapsed_seconds;
+};
+
 struct HabConfig {
   BalloonType balloon_type;
   CommsConfig comms;
+  CutawayConfig cutaway;
   uint8_t gps_count;
   uint8_t pressure_sensor_count;
   uint8_t temperature_sensor_count;
@@ -54,6 +84,7 @@ struct HabStatus {
   GpsFix gps[kMaxGpsModules];
   SensorReadings sensors;
   ActuatorState actuators;
+  CutawayStatus cutaway;
 };
 
 class ArduHab {
@@ -64,6 +95,7 @@ class ArduHab {
   void UpdateSensors(const SensorReadings& readings);
   void UpdateGps(const GpsFix (&gps)[kMaxGpsModules]);
   void SetCutawayState(uint8_t index, bool enabled);
+  void EvaluateCutaway(const CutawayInputs& inputs);
   void SetHeaterState(uint8_t index, bool enabled);
   void SetVentPosition(float position);
   const HabStatus& status() const;
