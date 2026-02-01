@@ -66,6 +66,13 @@ ArduHab::ArduHab() : config_{}, status_{} {
   config_.cutaway.geofence.radius_m = 0.0f;
   config_.cutaway.max_altitude_enabled = false;
   config_.cutaway.max_altitude_m = 0.0f;
+  for (size_t index = 0; index < kMaxCutawayCircuits; ++index) {
+    config_.actuators.cutaway_present[index] = true;
+  }
+  for (size_t index = 0; index < kMaxHeaters; ++index) {
+    config_.actuators.heater_present[index] = true;
+  }
+  config_.actuators.vent_actuator_present = false;
   config_.gps_count = 0U;
   config_.pressure_sensor_count = 0U;
   config_.temperature_sensor_count = 0U;
@@ -102,6 +109,10 @@ void ArduHab::UpdateGps(const GpsFix (&gps)[kMaxGpsModules]) {
 
 void ArduHab::SetCutawayState(uint8_t index, bool enabled) {
   if (index >= kMaxCutawayCircuits) {
+    return;
+  }
+  if (!config_.actuators.cutaway_present[index]) {
+    status_.actuators.cutaway_enabled[index] = false;
     return;
   }
   status_.actuators.cutaway_enabled[index] = enabled;
@@ -152,10 +163,19 @@ void ArduHab::SetHeaterState(uint8_t index, bool enabled) {
   if (index >= kMaxHeaters) {
     return;
   }
+  if (!config_.actuators.heater_present[index]) {
+    status_.actuators.heater_enabled[index] = false;
+    return;
+  }
   status_.actuators.heater_enabled[index] = enabled;
 }
 
 void ArduHab::SetVentPosition(float position) {
+  if (!config_.actuators.vent_actuator_present ||
+      config_.balloon_type != BalloonType::kVentedLatexMeteorological) {
+    status_.actuators.vent_position = 0.0f;
+    return;
+  }
   status_.actuators.vent_position = Clamp01(position);
 }
 
@@ -184,14 +204,43 @@ void ArduHab::ResetActuators() {
 
 void ArduHab::ApplySafetyLimits() {
   for (size_t index = 0; index < kMaxPressureSensors; ++index) {
-    if (status_.sensors.pressure_mbar[index] < kMinPressureMbar) {
+    if (index >= config_.pressure_sensor_count) {
+      status_.sensors.pressure_mbar[index] = kMinPressureMbar;
+      continue;
+    }
+    if (!std::isfinite(status_.sensors.pressure_mbar[index]) ||
+        status_.sensors.pressure_mbar[index] < kMinPressureMbar) {
       status_.sensors.pressure_mbar[index] = kMinPressureMbar;
     }
   }
   for (size_t index = 0; index < kMaxTemperatureSensors; ++index) {
-    if (status_.sensors.temperature_c[index] < kMinTemperatureC) {
+    if (index >= config_.temperature_sensor_count) {
+      status_.sensors.temperature_c[index] = kMinTemperatureC;
+      continue;
+    }
+    if (!std::isfinite(status_.sensors.temperature_c[index]) ||
+        status_.sensors.temperature_c[index] < kMinTemperatureC) {
       status_.sensors.temperature_c[index] = kMinTemperatureC;
     }
+  }
+  for (size_t index = 0; index < kMaxGpsModules; ++index) {
+    if (index >= config_.gps_count) {
+      status_.gps[index].valid = false;
+    }
+  }
+  for (size_t index = 0; index < kMaxCutawayCircuits; ++index) {
+    if (!config_.actuators.cutaway_present[index]) {
+      status_.actuators.cutaway_enabled[index] = false;
+    }
+  }
+  for (size_t index = 0; index < kMaxHeaters; ++index) {
+    if (!config_.actuators.heater_present[index]) {
+      status_.actuators.heater_enabled[index] = false;
+    }
+  }
+  if (!config_.actuators.vent_actuator_present ||
+      config_.balloon_type != BalloonType::kVentedLatexMeteorological) {
+    status_.actuators.vent_position = 0.0f;
   }
 }
 

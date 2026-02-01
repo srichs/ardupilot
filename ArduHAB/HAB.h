@@ -52,6 +52,12 @@ struct SensorReadings {
   float temperature_c[kMaxTemperatureSensors];
 };
 
+struct ActuatorConfig {
+  bool cutaway_present[kMaxCutawayCircuits];
+  bool heater_present[kMaxHeaters];
+  bool vent_actuator_present;
+};
+
 struct ActuatorState {
   bool cutaway_enabled[kMaxCutawayCircuits];
   bool heater_enabled[kMaxHeaters];
@@ -75,6 +81,7 @@ struct HabConfig {
   BalloonType balloon_type;
   CommsConfig comms;
   CutawayConfig cutaway;
+  ActuatorConfig actuators;
   uint8_t gps_count;
   uint8_t pressure_sensor_count;
   uint8_t temperature_sensor_count;
